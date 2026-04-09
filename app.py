@@ -1,73 +1,73 @@
-from flask import Flask, request, jsonify
+from celery import Celery
+import subprocess
 import os
+import glob
 import time
+import requests
 
-app = Flask(__name__)
+celery = Celery(
+    'tasks',
+    broker='redis://localhost:6379/0',
+    backend='redis://localhost:6379/0'
+)
 
-# 🔥 Use /tmp (Render requirement)
-UPLOAD_FOLDER = "/tmp/frames"
-VIDEO_FOLDER = "/tmp/videos"
+# 🔑 TELEGRAM CONFIG
+BOT_TOKEN = "YOUR_BOT_TOKEN"
+CHAT_ID = "YOUR_CHAT_ID"
 
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(VIDEO_FOLDER, exist_ok=True)
+def send_telegram(video_path):
+    print("📩 Sending video to Telegram...")
 
-frame_count = 0
-FRAME_THRESHOLD = 20  # 🔥 change if needed
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo"
 
-# ===========================
-# HOME
-# ===========================
-@app.route('/')
-def home():
-    return "ESP32 CCTV SERVER RUNNING ✅"
+    with open(video_path, "rb") as video:
+        requests.post(url, data={"chat_id": CHAT_ID}, files={"video": video})
 
-# ===========================
-# UPLOAD
-# ===========================
-@app.route('/upload', methods=['POST'])
-def upload():
-    global frame_count
+    print("✅ Sent to Telegram")
 
-    filename = f"{UPLOAD_FOLDER}/frame_{int(time.time()*1000)}.jpg"
 
-    with open(filename, "wb") as f:
-        f.write(request.data)
+def upload_to_cloud(video_path):
+    print("☁️ Uploading to cloud (basic)...")
 
-    frame_count += 1
-    print("Frame:", frame_count)
+    # Example: save in cloud folder (simulate)
+    os.makedirs("cloud", exist_ok=True)
 
-    # 🔥 AUTO VIDEO TRIGGER
-    if frame_count >= FRAME_THRESHOLD:
-        create_video()
+    filename = os.path.basename(video_path)
+    os.rename(video_path, f"cloud/{filename}")
 
-    return "OK", 200
+    print("✅ Uploaded to cloud folder")
 
-# ===========================
-# VIDEO CREATION
-# ===========================
+
+@celery.task
 def create_video():
-    global frame_count
+    print("🎬 Celery worker started...")
 
-    print("🎬 Creating video...")
+    timestamp = int(time.time())
+    output_file = f"videos/video_{timestamp}.mp4"
 
-    output = f"{VIDEO_FOLDER}/output.mp4"
+    command = [
+        "ffmpeg",
+        "-y",
+        "-framerate", "5",
+        "-i", "frames/frame_%d.jpg",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        output_file
+    ]
 
-    os.system(f"ffmpeg -y -framerate 5 -pattern_type glob -i '{UPLOAD_FOLDER}/*.jpg' {output}")
+    subprocess.run(command)
 
-    print("✅ Video created:", output)
+    print(f"✅ Video created: {output_file}")
 
-    # 🔥 DELETE OLD FRAMES
-    for f in os.listdir(UPLOAD_FOLDER):
-        os.remove(os.path.join(UPLOAD_FOLDER, f))
+    # 📩 TELEGRAM SEND
+    send_telegram(output_file)
 
-    frame_count = 0
+    # ☁️ CLOUD UPLOAD
+    upload_to_cloud(output_file)
 
-# ===========================
-# STATUS
-# ===========================
-@app.route('/status')
-def status():
-    return jsonify({
-        "frames": frame_count,
-        "threshold": FRAME_THRESHOLD
-    })
+    # 🧹 DELETE FRAMES
+    files = glob.glob("frames/*.jpg")
+    for f in files:
+        os.remove(f)
+
+    print("🧹 Frames deleted")
