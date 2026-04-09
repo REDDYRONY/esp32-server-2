@@ -1,29 +1,24 @@
-from flask import Flask, request
-import os
-from datetime import datetime
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+frame_count = 0
 
 @app.route('/')
 def home():
-    return "Server is running 🚀"
+    return "ESP32 Server Running ✅"
 
 @app.route('/upload', methods=['POST'])
 def upload():
-    data = request.data
+    global frame_count
+    frame_count += 1
+    print("Frame received:", frame_count)
+    return "OK"
 
-    if not data:
-        return "No data", 400
+@app.route('/status')
+def status():
+    return jsonify({
+        "frames": frame_count
+    })
 
-    filename = datetime.now().strftime("%Y%m%d_%H%M%S.jpg")
-
-    with open(os.path.join(UPLOAD_FOLDER, filename), "wb") as f:
-        f.write(data)
-
-    return "Uploaded", 200
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+app.run(host="0.0.0.0", port=5000)
